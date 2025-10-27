@@ -4,7 +4,8 @@ import _pickle as pickle
 from preprocess import save_data
 from preprocess.parse_csv import Mimic3Parser, Mimic4Parser, EICUParser
 from preprocess.encode import encode_code
-from preprocess.build_dataset import split_patients, build_code_xy, build_heart_failure_y
+from preprocess.build_dataset import split_patients, split_patient_cohorts, build_code_xy, build_heart_failure_y
+from preprocess.auxiliary import identify_patient_cohorts
 
 if __name__ == '__main__':
     conf = {
@@ -12,20 +13,23 @@ if __name__ == '__main__':
             'parser': Mimic3Parser,
             'train_num': 6000,
             'test_num': 1000,
-            'threshold': 0.01
+            'threshold': 0.01,
+            'cohort_feature': 'age'
         },
         'mimic4': {
             'parser': Mimic4Parser,
             'train_num': 8000,
             'test_num': 1000,
             'threshold': 0.01,
-            'sample_num': 10000
+            'sample_num': 10000,
+            'cohort_feature': 'year'
         },
         'eicu': {
             'parser': EICUParser,
             'train_num': 8000,
             'test_num': 1000,
-            'threshold': 0.01
+            'threshold': 0.01,
+            'cohort_feature': 'region'
         }
     }
     from_saved = False
@@ -46,15 +50,17 @@ if __name__ == '__main__':
     if from_saved:
         patient_admission = pickle.load(open(os.path.join(parsed_path, 'patient_admission.pkl'), 'rb'))
         admission_codes = pickle.load(open(os.path.join(parsed_path, 'admission_codes.pkl'), 'rb'))
+        patient_info = pickle.load(open(os.path.join(parsed_path, 'patient_info.pkl'), 'rb'))
     else:
         parser = conf[dataset]['parser'](raw_path)
         sample_num = conf[dataset].get('sample_num', None)
-        patient_admission, admission_codes = parser.parse(sample_num)
+        patient_admission, admission_codes, patient_info = parser.parse(sample_num)
         print('saving parsed data ...')
         if not os.path.exists(parsed_path):
             os.makedirs(parsed_path)
         pickle.dump(patient_admission, open(os.path.join(parsed_path, 'patient_admission.pkl'), 'wb'))
         pickle.dump(admission_codes, open(os.path.join(parsed_path, 'admission_codes.pkl'), 'wb'))
+        pickle.dump(patient_info, open(os.path.join(parsed_path, 'patient_info.pkl'), 'wb'))
 
     patient_num = len(patient_admission)
     max_admission_num = max([len(admissions) for admissions in patient_admission.values()])
@@ -72,13 +78,33 @@ if __name__ == '__main__':
     code_num = len(code_map)
     print('There are %d codes' % code_num)
 
-    train_pids, valid_pids, test_pids = split_patients(
-        patient_admission=patient_admission,
-        admission_codes=admission_codes,
-        code_map=code_map,
-        train_num=conf[dataset]['train_num'],
-        test_num=conf[dataset]['test_num']
-    )
+    print('identifying patient cohorts ...')
+    patient_cohorts = identify_patient_cohorts(patient_info)
+
+    features = ['age', 'gender', 'ethnicity', 'insurance', 'language', 'marital_status', 'year', 'region']
+    for feature in features:
+        true_count = sum(1 for cohort in patient_cohorts.values() if cohort.get(feature) is True)
+        false_count = sum(1 for cohort in patient_cohorts.values() if cohort.get(feature) is False)
+        print(f'{feature}: True={true_count}, False={false_count}')
+
+    cohort_feature = conf[dataset].get('cohort_feature')
+    if cohort_feature:
+        print(f'splitting patients by cohort feature: {cohort_feature} ...')
+        train_pids, valid_pids, test_pids = split_patient_cohorts(
+            patient_admission=patient_admission,
+            patient_cohorts=patient_cohorts,
+            cohort_feature=cohort_feature,
+            test_num=conf[dataset]['test_num']
+        )
+    else:
+        print('splitting patients using default method ...')
+        train_pids, valid_pids, test_pids = split_patients(
+            patient_admission=patient_admission,
+            admission_codes=admission_codes,
+            code_map=code_map,
+            train_num=conf[dataset]['train_num'],
+            test_num=conf[dataset]['test_num']
+        )
     print('There are %d train, %d valid, %d test samples' % (len(train_pids), len(valid_pids), len(test_pids)))
 
     common_args = [patient_admission, admission_codes_encoded, max_admission_num, code_num]
@@ -103,6 +129,7 @@ if __name__ == '__main__':
     pickle.dump(patient_admission, open(os.path.join(encoded_path, 'patient_admission.pkl'), 'wb'))
     pickle.dump(admission_codes_encoded, open(os.path.join(encoded_path, 'codes_encoded.pkl'), 'wb'))
     pickle.dump(code_map, open(os.path.join(encoded_path, 'code_map.pkl'), 'wb'))
+    pickle.dump(patient_cohorts, open(os.path.join(encoded_path, 'patient_cohorts.pkl'), 'wb'))
     pickle.dump({
         'train_pids': train_pids,
         'valid_pids': valid_pids,

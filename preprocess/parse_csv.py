@@ -22,6 +22,7 @@ class EHRParser:
         self.admission_codes = None
         self.admission_procedures = None
         self.admission_medications = None
+        self.patient_info = None
 
         self.parse_fn = {'d': self.set_diagnosis}
 
@@ -131,6 +132,9 @@ class EHRParser:
                 admission_codes[adm_id] = self.admission_codes[adm_id]
         self.admission_codes = admission_codes
 
+    def parse_demographics(self):
+        raise NotImplementedError
+
     def parse(self, sample_num=None, seed=6669):
         self.parse_admission()
         self.parse_diagnoses()
@@ -138,7 +142,8 @@ class EHRParser:
         self.calibrate_admission_by_patient()
         if sample_num is not None:
             self.sample_patients(sample_num, seed)
-        return self.patient_admission, self.admission_codes
+        self.parse_demographics()
+        return self.patient_admission, self.admission_codes, self.patient_info
 
 
 class Mimic3Parser(EHRParser):
@@ -166,6 +171,82 @@ class Mimic3Parser(EHRParser):
         split_pos = 4 if code.startswith('E') else 3
         icd9_code = code[:split_pos] + '.' + code[split_pos:] if len(code) > split_pos else code
         return icd9_code
+
+    def parse_demographics(self):
+        print('parsing patient info for MIMIC-III ...')
+
+        patients_df = pd.read_csv(
+            os.path.join(self.path, 'PATIENTS.csv'),
+            usecols=['SUBJECT_ID', 'GENDER', 'DOB'],
+            converters={
+                'SUBJECT_ID': int,
+                'GENDER': str,
+                'DOB': lambda cell: datetime.strptime(str(cell), '%Y-%m-%d %H:%M:%S')
+            }
+        )
+
+        admissions_df = pd.read_csv(
+            os.path.join(self.path, 'ADMISSIONS.csv'),
+            usecols=['SUBJECT_ID', 'HADM_ID', 'ADMITTIME', 'ETHNICITY', 'INSURANCE', 'LANGUAGE', 'MARITAL_STATUS'],
+            converters={
+                'SUBJECT_ID': int,
+                'HADM_ID': int,
+                'ADMITTIME': lambda cell: datetime.strptime(str(cell), '%Y-%m-%d %H:%M:%S'),
+                'ETHNICITY': str,
+                'INSURANCE': str,
+                'LANGUAGE': str,
+                'MARITAL_STATUS': str
+            }
+        )
+
+        patient_info = OrderedDict()
+
+        for pid in self.patient_admission.keys():
+            info = {}
+
+            patient_row = patients_df[patients_df['SUBJECT_ID'] == pid]
+            if not patient_row.empty:
+                info['gender'] = patient_row.iloc[0]['GENDER']
+                dob = patient_row.iloc[0]['DOB']
+            else:
+                info['gender'] = None
+                dob = None
+
+            admissions = self.patient_admission[pid]
+            first_adm_time = admissions[0][self.adm_time_col]
+            most_recent_adm_id = admissions[-1][self.adm_id_col]
+            most_recent_adm_time = admissions[-1][self.adm_time_col]
+
+            adm_row = admissions_df[admissions_df['HADM_ID'] == most_recent_adm_id]
+
+            if dob is not None and most_recent_adm_time is not None:
+                info['age'] = most_recent_adm_time.year - dob.year
+            else:
+                info['age'] = None
+
+            if first_adm_time is not None and most_recent_adm_time is not None:
+                year_offset = most_recent_adm_time.year - first_adm_time.year
+                info['year'] = 2012 - year_offset
+            else:
+                info['year'] = None
+
+            info['region'] = None
+
+            if not adm_row.empty:
+                info['ethnicity'] = adm_row.iloc[0]['ETHNICITY']
+                info['insurance'] = adm_row.iloc[0]['INSURANCE']
+                info['language'] = adm_row.iloc[0]['LANGUAGE']
+                info['marital_status'] = adm_row.iloc[0]['MARITAL_STATUS']
+            else:
+                info['ethnicity'] = None
+                info['insurance'] = None
+                info['language'] = None
+                info['marital_status'] = None
+
+            patient_info[pid] = info
+
+        self.patient_info = patient_info
+        print('parsed patient info for %d patients' % len(patient_info))
 
 
 class Mimic4Parser(EHRParser):
@@ -259,6 +340,80 @@ class Mimic4Parser(EHRParser):
     def to_standard_icd9(code: str):
         return Mimic3Parser.to_standard_icd9(code)
 
+    def parse_demographics(self):
+        print('parsing patient info for MIMIC-IV ...')
+
+        patients_df = pd.read_csv(
+            os.path.join(self.path, 'patients.csv'),
+            usecols=['subject_id', 'gender', 'anchor_age', 'anchor_year', 'anchor_year_group'],
+            converters={
+                'subject_id': int,
+                'gender': str,
+                'anchor_age': int,
+                'anchor_year': int,
+                'anchor_year_group': lambda cell: int(str(cell)[:4])
+            }
+        )
+
+        admissions_df = pd.read_csv(
+            os.path.join(self.path, 'admissions.csv'),
+            usecols=['subject_id', 'hadm_id', 'admittime', 'race', 'insurance', 'language', 'marital_status'],
+            converters={
+                'subject_id': int,
+                'hadm_id': int,
+                'admittime': lambda cell: datetime.strptime(str(cell), '%Y-%m-%d %H:%M:%S'),
+                'race': str,
+                'insurance': str,
+                'language': str,
+                'marital_status': str
+            }
+        )
+
+        patient_info = OrderedDict()
+
+        for pid in self.patient_admission.keys():
+            info = {}
+
+            patient_row = patients_df[patients_df['subject_id'] == pid]
+            if not patient_row.empty:
+                info['gender'] = patient_row.iloc[0]['gender']
+                info['age'] = patient_row.iloc[0]['anchor_age']
+                anchor_year = patient_row.iloc[0]['anchor_year']
+                anchor_year_group = patient_row.iloc[0]['anchor_year_group']
+                year_offset = anchor_year - anchor_year_group
+            else:
+                info['gender'] = None
+                info['age'] = None
+                year_offset = 0
+
+            admissions = self.patient_admission[pid]
+            most_recent_adm_id = admissions[-1][self.adm_id_col]
+            most_recent_adm_time = admissions[-1][self.adm_time_col]
+
+            if most_recent_adm_time is not None and year_offset is not None:
+                info['year'] = most_recent_adm_time.year - year_offset
+            else:
+                info['year'] = None
+
+            info['region'] = None
+
+            adm_row = admissions_df[admissions_df['hadm_id'] == most_recent_adm_id]
+            if not adm_row.empty:
+                info['ethnicity'] = adm_row.iloc[0]['race']
+                info['insurance'] = adm_row.iloc[0]['insurance']
+                info['language'] = adm_row.iloc[0]['language']
+                info['marital_status'] = adm_row.iloc[0]['marital_status']
+            else:
+                info['ethnicity'] = None
+                info['insurance'] = None
+                info['language'] = None
+                info['marital_status'] = None
+
+            patient_info[pid] = info
+
+        self.patient_info = patient_info
+        print('parsed patient info for %d patients' % len(patient_info))
+
 
 class EICUParser(EHRParser):
     def __init__(self, path):
@@ -314,3 +469,69 @@ class EICUParser(EHRParser):
         for adm_id, codes in self.admission_codes.items():
             t[adm_id] = list(set(codes))
         self.admission_codes = t
+
+    def parse_demographics(self):
+        print('parsing patient info for eICU ...')
+
+        patient_df = pd.read_csv(
+            os.path.join(self.path, 'patient.csv'),
+            usecols=['patienthealthsystemstayid', 'patientunitstayid', 'gender', 'age', 'ethnicity', 'hospitalid'],
+            converters={
+                'patienthealthsystemstayid': int,
+                'patientunitstayid': int,
+                'gender': str,
+                'age': str,
+                'ethnicity': str,
+                'hospitalid': int
+            }
+        )
+
+        hospital_df = pd.read_csv(
+            os.path.join(self.path, 'hospital.csv'),
+            usecols=['hospitalid', 'region'],
+            converters={
+                'hospitalid': int,
+                'region': str
+            }
+        )
+
+        hospital_region_map = {row['hospitalid']: row['region'] for _, row in hospital_df.iterrows()}
+
+        patient_info = OrderedDict()
+
+        for pid in self.patient_admission.keys():
+            info = {}
+
+            admissions = self.patient_admission[pid]
+            most_recent_adm_id = admissions[-1][self.adm_id_col]
+
+            patient_row = patient_df[patient_df['patientunitstayid'] == most_recent_adm_id]
+
+            if not patient_row.empty:
+                info['gender'] = patient_row.iloc[0]['gender']
+
+                age_str = patient_row.iloc[0]['age']
+                try:
+                    info['age'] = int(age_str) if age_str.isdigit() else 90
+                except:
+                    info['age'] = None
+
+                info['ethnicity'] = patient_row.iloc[0]['ethnicity']
+
+                hospital_id = patient_row.iloc[0]['hospitalid']
+                info['region'] = hospital_region_map.get(hospital_id, None)
+            else:
+                info['gender'] = None
+                info['age'] = None
+                info['ethnicity'] = None
+                info['region'] = None
+
+            info['insurance'] = None
+            info['language'] = None
+            info['marital_status'] = None
+            info['year'] = None
+
+            patient_info[pid] = info
+
+        self.patient_info = patient_info
+        print('parsed patient info for %d patients' % len(patient_info))

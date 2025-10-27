@@ -60,3 +60,56 @@ def build_heart_failure_y(hf_prefix, codes_y, code_map):
     hf_exist = np.logical_and(codes_y, hfs)
     y = (np.sum(hf_exist, axis=-1) > 0).astype(int)
     return y
+
+
+def split_patient_cohorts(patient_admission, patient_cohorts, cohort_feature, test_num):
+    if cohort_feature not in ['age', 'gender', 'ethnicity', 'insurance', 'language', 'marital_status', 'year', 'region']:
+        raise ValueError(f'Invalid cohort feature: {cohort_feature}')
+
+    feature_support = {pid: cohorts.get(cohort_feature) for pid, cohorts in patient_cohorts.items()}
+
+    has_true = any(feature_support.values())
+    has_false = any(not v for v in feature_support.values())
+
+    if not has_true and not has_false:
+        raise ValueError(f'Feature {cohort_feature} is not available in this dataset (all values are False)')
+
+    if not has_false:
+        raise ValueError(f'Feature {cohort_feature} has no False values, cannot split dataset')
+
+    true_pids = [pid for pid, value in feature_support.items() if value is True]
+    false_pids = [pid for pid, value in feature_support.items() if value is False]
+
+    print(f'Cohort split on {cohort_feature}: {len(true_pids)} True, {len(false_pids)} False')
+
+    train_pids = set(true_pids)
+
+    max_admission_num = 0
+    pid_max_admission_num = None
+    for pid in false_pids:
+        admissions = patient_admission[pid]
+        if len(admissions) > max_admission_num:
+            max_admission_num = len(admissions)
+            pid_max_admission_num = pid
+
+    if pid_max_admission_num is not None and pid_max_admission_num not in train_pids:
+        false_pids.remove(pid_max_admission_num)
+        test_pids_set = {pid_max_admission_num}
+    else:
+        test_pids_set = set()
+
+    remaining_false_pids = np.array(false_pids)
+    np.random.shuffle(remaining_false_pids)
+
+    num_needed_for_test = test_num - len(test_pids_set)
+    if num_needed_for_test > 0:
+        test_pids_set.update(remaining_false_pids[:num_needed_for_test])
+        valid_pids = remaining_false_pids[num_needed_for_test:]
+    else:
+        valid_pids = remaining_false_pids
+
+    train_pids = np.array(list(train_pids))
+    test_pids = np.array(list(test_pids_set))
+    valid_pids = np.array(valid_pids)
+
+    return train_pids, valid_pids, test_pids
