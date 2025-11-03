@@ -18,10 +18,10 @@ if __name__ == '__main__':
         },
         'mimic4': {
             'parser': Mimic4Parser,
-            'train_num': 8000,
-            'test_num': 1000,
+            'train_num': 20000,
+            'test_num': 5000,
             'threshold': 0.01,
-            'sample_num': 10000,
+            'sample_num': 40000,
             'cohort_feature': 'year'
         },
         'eicu': {
@@ -32,9 +32,9 @@ if __name__ == '__main__':
             'cohort_feature': 'region'
         }
     }
-    from_saved = False
+    from_saved = True
     data_path = 'data'
-    dataset = 'eicu'  # mimic3, eicu, or mimic4
+    dataset = 'mimic4'  # mimic3, eicu, or mimic4
     dataset_path = os.path.join(data_path, dataset)
     if dataset in ['mimic3', 'mimic4']:
         raw_path = os.path.join(dataset_path, 'raw')
@@ -83,8 +83,8 @@ if __name__ == '__main__':
 
     features = ['age', 'gender', 'ethnicity', 'insurance', 'language', 'marital_status', 'year', 'region']
     for feature in features:
-        true_count = sum(1 for cohort in patient_cohorts.values() if cohort.get(feature) is True)
-        false_count = sum(1 for cohort in patient_cohorts.values() if cohort.get(feature) is False)
+        true_count = sum(1 for cohort in patient_cohorts.values() if cohort.get(feature) == True)
+        false_count = sum(1 for cohort in patient_cohorts.values() if cohort.get(feature) == False)
         print(f'{feature}: True={true_count}, False={false_count}')
 
     cohort_feature = conf[dataset].get('cohort_feature')

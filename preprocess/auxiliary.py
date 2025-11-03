@@ -46,7 +46,7 @@ def identify_patient_cohorts(patient_info):
             cohort['marital_status'] = False
 
         year = info.get('year')
-        cohort['year'] = year >= 2017 if year is not None else False
+        cohort['year'] = year <= 2017 if year is not None else False
 
         region = info.get('region')
         if region is None:

@@ -305,8 +305,9 @@ class Mimic4Parser(EHRParser):
                 print('\r\t\t%d in %d rows' % (i + 1, n), end='')
             pid = row[cols[self.pid_col]]
             year = row[cols[self.adm_time_col]].year - self.patient_year_map[pid]
-            if year > 2012:
-                valid_admissions.append(i)
+            # if year > 2012:
+            #     valid_admissions.append(i)
+            valid_admissions.append(i)
         print('\r\t\t%d in %d rows' % (n, n))
         print('\t\tremaining %d rows' % len(valid_admissions))
         return admissions.iloc[valid_admissions]

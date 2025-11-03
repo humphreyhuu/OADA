@@ -77,8 +77,8 @@ def split_patient_cohorts(patient_admission, patient_cohorts, cohort_feature, te
     if not has_false:
         raise ValueError(f'Feature {cohort_feature} has no False values, cannot split dataset')
 
-    true_pids = [pid for pid, value in feature_support.items() if value is True]
-    false_pids = [pid for pid, value in feature_support.items() if value is False]
+    true_pids = [pid for pid, value in feature_support.items() if value == True]
+    false_pids = [pid for pid, value in feature_support.items() if value == False]
 
     print(f'Cohort split on {cohort_feature}: {len(true_pids)} True, {len(false_pids)} False')
 

@@ -18,3 +18,11 @@ This document describes how patient demographic and spatiotemporal features are 
 | **region** | Any non-"West" value | "West" or NULL/empty | eICU | Spatial feature |
 
 
+MIMIC3:
+There are 4773 train, 1720 valid, 1000 test samples
+
+MIMIC4:
+There are 7084 train, 1916 valid, 1000 test samples
+
+eICU:
+There are 7463 train, 945 valid, 1000 test samples
