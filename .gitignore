@@ -3,3 +3,9 @@
 /.claude
 /OADA.md
 /plan.md
+
+__pycache__/
+/preprocess/__pycache__/
+/models/__pycache__/
+.conda/
+ochin_analysis_plots/

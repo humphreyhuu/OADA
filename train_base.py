@@ -68,8 +68,8 @@ class TransformerAdapter(torch.nn.Module):
 
 if __name__ == '__main__':
     seed = 6669
-    dataset = 'mimic4'  # 'mimic3', 'mimic4', or 'eicu'
-    task = 'h'  # 'm' for multi-label code prediction, 'h' for heart failure
+    dataset = 'eicu'  # 'mimic3', 'mimic4', or 'eicu'
+    task = 'm'  # 'm' for multi-label code prediction, 'h' for heart failure
     use_cuda = True
     device = torch.device('cuda' if torch.cuda.is_available() and use_cuda else 'cpu')
 

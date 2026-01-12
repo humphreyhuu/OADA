@@ -32,19 +32,19 @@ if __name__ == '__main__':
             'cohort_feature': 'region'
         }
     }
-    from_saved = True
+    from_saved = False
     data_path = 'data'
-    dataset = 'mimic4'  # mimic3, eicu, or mimic4
+    dataset = 'eicu'  # mimic3, eicu, or mimic4
     dataset_path = os.path.join(data_path, dataset)
     if dataset in ['mimic3', 'mimic4']:
-        raw_path = os.path.join(dataset_path, 'raw')
+        raw_path = os.path.join('../data/%s' % dataset, 'raw')
     elif dataset == 'eicu':
-        raw_path = os.path.join(dataset_path, 'raw/physionet.org/files/eicu-crd/2.0')
+        raw_path = os.path.join('../data/%s' % dataset, 'physionet.org/files/eicu-crd/2.0')
     else:
         raise ValueError('Invalid dataset: %s' % dataset)
     if not os.path.exists(raw_path):
         os.makedirs(raw_path)
-        print('please put the CSV files in `data/%s/raw`' % dataset)
+        print('please put the CSV files in `../data/%s/raw`' % dataset)
         exit()
     parsed_path = os.path.join(dataset_path, 'parsed')
     if from_saved:
