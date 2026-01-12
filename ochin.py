@@ -11,15 +11,26 @@ warnings.filterwarnings('ignore')
 
 class OCHINDataAnalyzer:
 
-    def __init__(self, data_path, icd_map_path=None):
+    def __init__(self, data_path, icd_map_path=None, use_cached=True):
         self.data_path = data_path
         self.icd_map_path = icd_map_path
+        self.use_cached = use_cached
         self.df = None
         self.merged_df = None
         self.icd9_to_icd10_map = None
         self.facilities_df = None
         self.demographics_df = None
         self.visit_df = None
+
+        # Determine cached file path (same directory as original data)
+        data_dir = os.path.dirname(data_path)
+        data_filename = os.path.basename(data_path)
+        # Replace .csv with _merged.csv, or _subsetXXX.csv with _merged.csv
+        if '_subset' in data_filename:
+            cached_filename = data_filename.split('_subset')[0] + '_merged.csv'
+        else:
+            cached_filename = data_filename.replace('.csv', '_merged.csv')
+        self.cached_data_path = os.path.join(data_dir, cached_filename)
 
     def _load_icd9_to_icd10_map(self):
         if self.icd_map_path is None or not os.path.exists(self.icd_map_path):
@@ -360,7 +371,7 @@ class OCHINDataAnalyzer:
         print("\n[1/3] Merging with demographics...")
         print(f"Before merge: {merged.shape}")
 
-        # Merge with demographics (100% overlap expected)
+        # Merge with demographics
         demo_cols = ['PATIENT_NUM', 'BIRTH_DATE', 'RACE_CD', 'GENDER_CD']
         demo_subset = self.demographics_df[demo_cols].copy()
 
@@ -434,22 +445,97 @@ class OCHINDataAnalyzer:
         # Clean up comment column (remove trailing semicolons)
         merged['comment'] = merged['comment'].str.rstrip(';')
 
+        # Show missing value summary BEFORE filtering
+        print("\n" + "="*80)
+        print("MERGED DATA SUMMARY (BEFORE FILTERING)")
+        print("="*80)
+        print(f"\nMerged data shape: {merged.shape}")
+        print(f"\nComment value counts:")
+        print(merged['comment'].value_counts())
+
+        print(f"\nMissing value summary for merged columns:")
+        merged_cols = ['BIRTH_DATE', 'RACE_CD', 'GENDER_CD', 'LOCATION_CD', 'FACILITY_TYPE', 'HEALTHSYSTEMID', 'STATE_ABBR']
+        for col in merged_cols:
+            if col in merged.columns:
+                missing_count = merged[col].isna().sum()
+                missing_pct = (missing_count / len(merged)) * 100
+                print(f"  {col}: {missing_count:,} ({missing_pct:.2f}%)")
+
+        # Filter out rows with missing values in critical columns
+        print("\n" + "="*80)
+        print("FILTERING DATA")
+        print("="*80)
+        print(f"\nBefore filtering: {merged.shape}")
+
+        critical_cols = ['LOCATION_CD', 'FACILITY_TYPE', 'HEALTHSYSTEMID', 'STATE_ABBR']
+        rows_before = len(merged)
+        merged = merged.dropna(subset=critical_cols)
+        rows_after = len(merged)
+        rows_removed = rows_before - rows_after
+
+        print(f"After filtering (removed rows with missing LOCATION_CD/FACILITY_TYPE/HEALTHSYSTEMID/STATE_ABBR): {merged.shape}")
+        print(f"Removed {rows_removed:,} rows ({rows_removed/rows_before*100:.2f}%)")
+
+        # Reset index after filtering
+        merged = merged.reset_index(drop=True)
+        print(f"Index reset. Final shape: {merged.shape}")
+
         self.merged_df = merged
 
         print("\n" + "="*80)
-        print("MERGED DATA SUMMARY")
+        print("FINAL MERGED DATA SUMMARY (AFTER FILTERING)")
         print("="*80)
         print(f"\nFinal merged data shape: {self.merged_df.shape}")
         print(f"\nComment value counts:")
         print(self.merged_df['comment'].value_counts())
 
-        print(f"\nMissing value summary for merged columns:")
-        merged_cols = ['BIRTH_DATE', 'RACE_CD', 'GENDER_CD', 'LOCATION_CD', 'FACILITY_TYPE', 'HEALTHSYSTEMID', 'STATE_ABBR']
-        for col in merged_cols:
-            if col in self.merged_df.columns:
-                missing_count = self.merged_df[col].isna().sum()
-                missing_pct = (missing_count / len(self.merged_df)) * 100
-                print(f"  {col}: {missing_count:,} ({missing_pct:.2f}%)")
+        return self
+
+    def save_merged_data(self):
+        """Save merged data to cached file"""
+        if self.merged_df is None:
+            print("Error: No merged data to save. Please run merge_data() first.")
+            return self
+
+        # Create a copy and drop the comment column before saving
+        df_to_save = self.merged_df.copy()
+        if 'comment' in df_to_save.columns:
+            df_to_save = df_to_save.drop('comment', axis=1)
+            print(f"\nDropped 'comment' column before saving")
+
+        print(f"Saving merged data to: {self.cached_data_path}")
+        df_to_save.to_csv(self.cached_data_path, index=False)
+        print(f"Successfully saved {len(df_to_save):,} rows with {len(df_to_save.columns)} columns")
+
+        return self
+
+    def load_cached_data(self):
+        """Load cached merged data if available"""
+        if not os.path.exists(self.cached_data_path):
+            print(f"Cached file not found at: {self.cached_data_path}")
+            return False
+
+        print("\n" + "="*80)
+        print("LOADING CACHED DATA")
+        print("="*80)
+        print(f"\nLoading from: {self.cached_data_path}")
+
+        self.merged_df = pd.read_csv(self.cached_data_path)
+        print(f"Successfully loaded {len(self.merged_df):,} rows")
+
+        return True
+
+    def print_merged_info(self):
+        """Print info about merged dataframe"""
+        if self.merged_df is None:
+            print("Error: No merged data available.")
+            return self
+
+        print("\n" + "="*80)
+        print("MERGED DATA INFO (DOUBLE CHECK)")
+        print("="*80)
+        print()
+        self.merged_df.info()
 
         return self
 
@@ -458,6 +544,19 @@ class OCHINDataAnalyzer:
         print("STARTING COMPREHENSIVE OCHIN DATA ANALYSIS")
         print("="*80)
 
+        # Check if we should use cached data
+        if self.use_cached and merge:
+            if self.load_cached_data():
+                # Successfully loaded cached data, skip to info and finish
+                self.print_merged_info()
+                print("\n" + "="*80)
+                print("ANALYSIS COMPLETE (LOADED FROM CACHE)")
+                print("="*80)
+                return self
+            else:
+                print("Cached data not found. Running full analysis...")
+
+        # Run full analysis from scratch
         self.load_data()
         self.basic_info()
         self.patient_analysis()
@@ -470,6 +569,8 @@ class OCHINDataAnalyzer:
 
             if merge:
                 self.merge_data()
+                self.save_merged_data()
+                self.print_merged_info()
 
         print("\n" + "="*80)
         print("ANALYSIS COMPLETE")
@@ -486,7 +587,8 @@ def main():
     if not os.path.exists(icd_map_path):
         icd_map_path = None
 
-    analyzer = OCHINDataAnalyzer(data_path, icd_map_path)
+    # Set use_cached=True to load cached data if available, False to run from scratch
+    analyzer = OCHINDataAnalyzer(data_path, icd_map_path, use_cached=True)
     analyzer.run_full_analysis(analyze_additional=True, base_path=base_path, merge=True)
 
 
